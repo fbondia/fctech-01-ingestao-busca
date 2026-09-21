@@ -1,155 +1,174 @@
-# Ingestão e Busca Semântica com LangChain e Postgres
+# Ingestão e Busca Semântica com LangChain e PostgreSQL
 
-## Objetivo
+Aplicação RAG em Python que extrai texto de um PDF, divide o conteúdo em chunks,
+gera embeddings com a OpenAI e persiste os vetores em PostgreSQL com pgVector.
+Depois da ingestão, um chat no terminal recupera os 10 trechos semanticamente mais
+próximos e pede à LLM que responda apenas com base neles.
 
-Você deve entregar um software capaz de:
+## Arquitetura
 
-- Ingestão: Ler um arquivo PDF e salvar suas informações em um banco de dados PostgreSQL com extensão pgVector.
-- Busca: Permitir que o usuário faça perguntas via linha de comando (CLI) e receba respostas baseadas apenas no conteúdo do PDF.
-
-## Exemplo no CLI
-
-Faça sua pergunta:
-
+```text
+document.pdf
+    │ PyPDFLoader
+    ▼
+chunks de 1.000 caracteres (overlap 150)
+    │ OpenAIEmbeddings
+    ▼
+PostgreSQL + pgVector
+    ▲ similarity_search_with_score(k=10)
+    │
+pergunta no CLI ──► prompt com contexto ──► ChatOpenAI ──► resposta
 ```
+
+## Pré-requisitos
+
+- Python 3.11 ou superior
+- Docker com Docker Compose
+- chave da API da OpenAI com créditos disponíveis
+
+Os modelos padrão são `text-embedding-3-small` para embeddings e
+`gpt-4.1-mini` para respostas. Ambos podem ser alterados no `.env`.
+
+## Instalação
+
+Clone este repositório e, na raiz do projeto, crie o ambiente virtual:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+No Windows PowerShell, a ativação é feita com:
+
+```powershell
+venv\Scripts\Activate.ps1
+```
+
+Crie a configuração local:
+
+```bash
+cp .env.example .env
+```
+
+Edite `.env` e substitua `sk-sua-chave-aqui` por sua chave real. Nunca publique
+o arquivo `.env`; ele já está ignorado pelo Git.
+
+## Execução
+
+1. Inicie o PostgreSQL e aguarde o healthcheck:
+
+   ```bash
+   docker compose up -d
+   docker compose ps
+   ```
+
+2. Faça a ingestão do PDF:
+
+   ```bash
+   python src/ingest.py
+   ```
+
+3. Inicie o chat:
+
+   ```bash
+   python src/chat.py
+   ```
+
+Exemplo de uso:
+
+```text
+Faça sua pergunta sobre o PDF (digite 'sair' para encerrar).
+
 PERGUNTA: Qual o faturamento da Empresa SuperTechIABrazil?
 RESPOSTA: O faturamento foi de 10 milhões de reais.
 
----
-
-Perguntas fora do contexto:
-
-PERGUNTA: Quantos clientes temos em 2024?
+PERGUNTA: Qual é a capital da França?
 RESPOSTA: Não tenho informações necessárias para responder sua pergunta.
 ```
 
-## Tecnologias obrigatórias
+Use `sair`, `exit`, `quit` ou `:q` para encerrar.
 
-- Linguagem: Python
-- Framework: LangChain
-- Banco de dados: PostgreSQL + pgVector
-- Execução do banco de dados: Docker & Docker Compose (docker-compose fornecido no repositório de exemplo)
+## Configuração
 
-## Pacotes recomendados
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | obrigatório | Chave da API da OpenAI |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Modelo de embeddings |
+| `OPENAI_CHAT_MODEL` | `gpt-4.1-mini` | Modelo de chat |
+| `POSTGRES_CONNECTION` | `postgresql+psycopg://postgres:postgres@localhost:5432/rag` | Conexão SQLAlchemy/psycopg |
+| `PGVECTOR_COLLECTION` | `pdf_documents` | Nome lógico da collection |
+| `PDF_PATH` | `document.pdf` | PDF relativo à raiz ou caminho absoluto |
+| `RECREATE_COLLECTION` | `true` | Substitui a collection durante a ingestão |
 
-- Split: `from langchain_text_splitters import RecursiveCharacterTextSplitter`
-- Embeddings (OpenAI): `from langchain_openai import OpenAIEmbeddings`
-- Embeddings (Gemini): `from langchain_google_genai import GoogleGenerativeAIEmbeddings`
-- PDF: `from langchain_community.document_loaders import PyPDFLoader`
-- Ingestão: `from langchain_postgres import PGVector`
-- Busca: `similarity_search_with_score(query, k=10)`
+Por padrão, cada ingestão recria somente a collection configurada. Isso evita
+duplicação ao executar o comando novamente. Use `RECREATE_COLLECTION=false`
+quando quiser acrescentar documentos à collection existente.
 
-## OpenAI
+## Troca do modelo de embeddings
 
-- Crie uma API Key da OpenAI.
-- Você vai precisar de um modelo de embeddings e de um modelo de LLM para responder. Consulte a documentação oficial da OpenAI para ver os modelos disponíveis.
+Modelos de embeddings podem produzir vetores com dimensões diferentes. Antes de
+trocar `OPENAI_EMBEDDING_MODEL`, apague os dados anteriores e ingira novamente:
 
-## Gemini
-
-- Crie uma API Key da Google.
-- Você vai precisar de um modelo de embeddings e de um modelo de LLM para responder. Consulte a documentação oficial do Google para ver os modelos disponíveis.
-
-Os limites de requisições gratuitas dos modelos podem mudar com frequência. Para informações atualizadas, consulte a documentação oficial do Google.
-
-## Escolha dos modelos
-
-Este desafio não fixa modelos. Nomes e versões mudam com frequência e alguns são descontinuados, então faz parte do desafio consultar a documentação oficial do provedor que você escolher, ver quais modelos estão disponíveis no momento e selecionar os que atendem ao objetivo. Para o volume deste desafio, os modelos mais leves e baratos de cada provedor são suficientes.
-
-Atenção: modelos de embedding diferentes geram vetores com dimensões diferentes. A tabela de vetores é criada na primeira ingestão, já com a dimensão do modelo que você escolheu. Se você trocar de modelo de embeddings depois disso, a ingestão passa a falhar por incompatibilidade de dimensão. Nesse caso é responsabilidade sua apagar a collection existente (ou o volume do banco) e refazer a ingestão do zero com o novo modelo.
-
-## Requisitos
-
-### 1. Ingestão do PDF
-
-- O PDF deve ser dividido em chunks de 1000 caracteres com overlap de 150.
-- Cada chunk deve ser convertido em embedding.
-- Os vetores devem ser armazenados no banco de dados PostgreSQL com pgVector.
-
-### 2. Consulta via CLI
-
-Criar um script Python para simular um chat no terminal.
-
-Passos ao receber uma pergunta:
-
-- Vetorizar a pergunta.
-- Buscar os 10 resultados mais relevantes (k=10) no banco vetorial.
-- Montar o prompt e chamar a LLM.
-- Retornar a resposta ao usuário.
-
-Prompt a ser utilizado:
-
-```
-CONTEXTO:
-{resultados concatenados do banco de dados}
-
-REGRAS:
-- Responda somente com base no CONTEXTO.
-- Se a informação não estiver explicitamente no CONTEXTO, responda:
-  "Não tenho informações necessárias para responder sua pergunta."
-- Nunca invente ou use conhecimento externo.
-- Nunca produza opiniões ou interpretações além do que está escrito.
-
-EXEMPLOS DE PERGUNTAS FORA DO CONTEXTO:
-Pergunta: "Qual é a capital da França?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
-Pergunta: "Quantos clientes temos em 2024?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
-Pergunta: "Você acha isso bom ou ruim?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
-PERGUNTA DO USUÁRIO:
-{pergunta do usuário}
-
-RESPONDA A "PERGUNTA DO USUÁRIO"
-```
-
-## Estrutura obrigatória do projeto
-
-Faça um fork do repositório para utilizar a estrutura abaixo: https://github.com/devfullcycle/mba-ia-desafio-ingestao-busca
-
-```
-├── docker-compose.yml
-├── requirements.txt      # Dependências
-├── .env.example          # Template das variáveis de ambiente
-├── src/
-│   ├── ingest.py         # Script de ingestão do PDF
-│   ├── search.py         # Script de busca
-│   ├── chat.py           # CLI para interação com usuário
-├── document.pdf          # PDF para ingestão
-└── README.md             # Instruções de execução
-```
-
-## VirtualEnv para Python
-
-Crie e ative um ambiente virtual antes de instalar dependências:
-
-```
-python3 -m venv venv
-source venv/bin/activate
-```
-
-## Ordem de execução
-
-1. Subir o banco de dados:
-
-```
+```bash
+docker compose down -v
 docker compose up -d
-```
-
-2. Executar ingestão do PDF:
-
-```
 python src/ingest.py
 ```
 
-3. Rodar o chat:
+O comando `down -v` remove o volume local do banco e todos os dados nele.
 
+## Solução de problemas
+
+- **`OPENAI_API_KEY nao foi definida`**: confira se `.env` existe na raiz e
+  contém uma chave válida.
+- **`connection refused`**: confirme com `docker compose ps` se `postgres` está
+  saudável e se a porta 5432 está livre.
+- **erro de dimensão do vetor**: o modelo de embeddings foi alterado após a
+  primeira ingestão; recrie o volume conforme a seção anterior.
+- **PDF sem texto**: PDFs formados apenas por imagens precisam passar por OCR
+  antes da ingestão.
+
+Para acompanhar o banco:
+
+```bash
+docker compose logs -f postgres
 ```
-python src/chat.py
+
+Para encerrar sem perder os vetores:
+
+```bash
+docker compose down
 ```
 
-## Entregável
+## Testes
 
-Repositório público no GitHub contendo todo o código-fonte e README com instruções claras de execução do projeto.
+Os testes não acessam a API da OpenAI e podem ser executados com a biblioteca
+padrão do Python:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Estrutura
+
+```text
+├── docker-compose.yml
+├── requirements.txt
+├── .env.example
+├── src/
+│   ├── config.py
+│   ├── ingest.py
+│   ├── search.py
+│   └── chat.py
+├── tests/
+├── document.pdf
+└── README.md
+```
+
+## Segurança da resposta
+
+O prompt instrui a LLM a usar somente os trechos recuperados e a responder com
+uma mensagem fixa quando a informação não estiver explícita. Isso reduz
+alucinações, mas não constitui uma garantia formal; aplicações críticas devem
+adicionar avaliações, limiar de relevância e observabilidade.
